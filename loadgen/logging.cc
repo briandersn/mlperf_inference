@@ -551,9 +551,24 @@ void TlsLogger::TraceCounters() {
       });
 }
 
+
 Logger& GlobalLogger() {
-  static Logger g_logger(kLogPollPeriod, kMaxThreadsToLog);
-  return g_logger;
+  struct GlobalLoggerInternal {
+    static std::shared_ptr<Logger>& GetInstance() {
+      static std::shared_ptr<Logger> g_logger =
+          std::make_shared<Logger>(kLogPollPeriod, kMaxThreadsToLog);
+      return g_logger;
+    }
+  };
+
+  // Use a shared_ptr in case of detatched threads.
+  // Detached threads can exit after the destruction of static storage
+  // duration variables, which would cause g_logger to be destroyed
+  // before all threads exit.
+  thread_local std::shared_ptr<Logger> tls_ref_to_g_logger =
+      GlobalLoggerInternal::GetInstance();
+
+  return *tls_ref_to_g_logger;
 }
 
 // TlsLoggerWrapper moves ownership of the TlsLogger to Logger on thread exit
