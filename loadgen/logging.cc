@@ -150,7 +150,21 @@ Logger::Logger(std::chrono::duration<double> poll_period,
   }
 }
 
-Logger::~Logger() {}
+Logger::~Logger() {
+  while (true) {
+    decltype(tls_loggers_registerd_)::iterator i;
+    {
+      std::unique_lock<std::mutex> lock(tls_loggers_registerd_mutex_);
+      if (tls_loggers_registerd_.empty()) {
+        break;
+      }
+      i = tls_loggers_registerd_.begin();
+    }
+    auto& orphan_maker = i->second
+    orphan_maker(); // Call the orphan_maker, which will detach the remaining
+                    // TlsLoggers from this global Logger.
+  }
+}
 
 void Logger::RequestSwapBuffers(TlsLogger* tls_logger) {
   auto tls_logger_as_uint = reinterpret_cast<uintptr_t>(tls_logger);
@@ -176,14 +190,16 @@ void Logger::RequestSwapBuffers(TlsLogger* tls_logger) {
   }
 }
 
-void Logger::RegisterTlsLogger(TlsLogger* tls_logger) {
+void Logger::RegisterTlsLogger(TlsLogger* tls_logger,
+                               std::function<void()> orphan_maker) {
   std::unique_lock<std::mutex> lock(tls_loggers_registerd_mutex_);
   if (tls_loggers_registerd_.size() >= max_threads_to_log_) {
     LogErrorSync(
         "Warning: More TLS loggers registerd than can "
         "be active simultaneously.\n");
   }
-  tls_loggers_registerd_.insert(tls_logger);
+  tls_loggers_registerd_.insert(
+      std::make_pair(tls_logger, std::move(orphan_maker)));
 }
 
 // This moves ownership of the tls_logger data to Logger so the
@@ -251,7 +267,7 @@ void Logger::StopLogging() {
     {
       std::unique_lock<std::mutex> lock(tls_loggers_registerd_mutex_);
       for (auto tls_logger : tls_loggers_registerd_) {
-        CollectTlsLoggerStats(tls_logger);
+        CollectTlsLoggerStats(tls_logger.first);
       }
     }
 
@@ -556,10 +572,23 @@ Logger& GlobalLogger() {
   return g_logger;
 }
 
+// This is a work around to avoid crashes when the destructors
+// of thread_local variabls attempt to access the global Logger at exit.
+// If the loadgen library was loaded as a python module, the global
+// Logger might be destroyed and all function definitions unloaded before the
+// last thread_local variable that references it.
+// Re-assigning thread_local variables to a standard library type avoids
+// segfaults.
+using StdLibAbiContainerWithTypeErasure = std::exception_ptr;
+using StdLibAbiElementWithVirtualDestructor = std::exception;
+#define StdLibAbiContainerWithTypeErasureMakeElement std::make_exception_ptr
+
 // TlsLoggerWrapper moves ownership of the TlsLogger to Logger on thread exit
 // so no round-trip synchronization with the IO thread is required.
 struct TlsLoggerWrapper {
-  TlsLoggerWrapper() { GlobalLogger().RegisterTlsLogger(tls_logger.get()); }
+  TlsLoggerWrapper(std::function<void()> orphan_maker) {
+    GlobalLogger().RegisterTlsLogger(tls_logger.get(), std::move(orphan_maker));
+  }
   ~TlsLoggerWrapper() {
     tls_logger->TraceCounters();
     GlobalLogger().UnRegisterTlsLogger(std::move(tls_logger));
@@ -567,9 +596,37 @@ struct TlsLoggerWrapper {
   std::unique_ptr<TlsLogger> tls_logger = std::make_unique<TlsLogger>();
 };
 
+// TlsLoggerWrapperAbiInheritor
+struct TlsLoggerWrapperAbiInheritor
+    : public StdLibAbiElementWithVirtualDestructor {
+  TlsLoggerWrapperAbiInheritor() = default;
+  explicit TlsLoggerWrapperAbiInheritor(std::shared_ptr<TlsLoggerWrapper> tlw)
+      : tls_logger_wrapper(tlw) {}
+  ~TlsLoggerWrapperAbiInheritor() override = default;
+  std::shared_ptr<TlsLoggerWrapper> tls_logger_wrapper;
+};
+
+// TODO: Is there a work around easier than this that still keeps things
+// simple for the logging client?
+TlsLoggerWrapper* InitializeMyTlsLoggerWrapper() {
+  TlsLoggerWrapperAbiInheritor tls_logger_wrapper_abi_inheritor;
+  thread_local StdLibAbiContainerWithTypeErasure maybe_wrapper =
+      StdLibAbiContainerWithTypeErasureMakeElement(
+          tls_logger_wrapper_abi_inheritor = TlsLoggerWrapperAbiInheritor(
+              std::make_shared<TlsLoggerWrapper>([&]() {
+                maybe_wrapper = StdLibAbiContainerWithTypeErasureMakeElement(
+                    StdLibAbiElementWithVirtualDestructor());
+              })));
+  return tls_logger_wrapper_abi_inheritor.tls_logger_wrapper.get();
+}
+
+TlsLogger* InitializeMyTlsLogger() {
+  thread_local TlsLoggerWrapper* wrapper = InitializeMyTlsLoggerWrapper();
+  return wrapper->tls_logger.get();
+}
+
 void Log(AsyncLogEntry&& entry) {
-  thread_local TlsLoggerWrapper wrapper;
-  thread_local TlsLogger* const tls_logger = wrapper.tls_logger.get();
+  thread_local TlsLogger* const tls_logger = InitializeMyTlsLogger();
   tls_logger->Log(std::forward<AsyncLogEntry>(entry));
 }
 
