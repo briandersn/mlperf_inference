@@ -34,6 +34,7 @@ generate_loadgen_version_definitions(generated_version_source_filename,
 
 public_headers = [
   "loadgen.h",
+  "mlperf_spec_constants.h",
   "query_sample.h",
   "query_sample_library.h",
   "system_under_test.h",
@@ -42,7 +43,6 @@ public_headers = [
 
 lib_headers = [
   "logging.h",
-  "mlperf_spec_constants.h",
   "test_settings_internal.h",
   "trace_generator.h",
   "utils.h",
@@ -52,6 +52,7 @@ lib_headers = [
 lib_sources = [
   "loadgen.cc",
   "logging.cc",
+  "mlperf_spec_constants.cc",
   "test_settings_internal.cc",
   "utils.cc",
   "version.cc",

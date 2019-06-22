@@ -10,6 +10,7 @@ generated_version_source_filename =
 
 public_headers = [
   "loadgen.h",
+  "mlperf_spec_constants.h",
   "query_sample.h",
   "query_sample_library.h",
   "system_under_test.h",
@@ -20,7 +21,7 @@ lib_sources = [
   "loadgen.cc",
   "logging.cc",
   "logging.h",
-  "mlperf_spec_constants.h",
+  "mlperf_spec_constants.cc",
   "test_settings_internal.cc",
   "test_settings_internal.h",
   "utils.cc",
