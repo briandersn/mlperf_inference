@@ -63,11 +63,12 @@ class SystemUnderTestTrampoline : public SystemUnderTest {
 }  // namespace
 
 void* ConstructSUT(ClientData client_data, const char* name, size_t name_length,
-                   IssueQueryCallback issue_cb, FlushQueriesCallback flush_queries_cb,
+                   IssueQueryCallback issue_cb,
+                   FlushQueriesCallback flush_queries_cb,
                    ReportLatencyResultsCallback report_latency_results_cb) {
-  SystemUnderTestTrampoline* sut =
-      new SystemUnderTestTrampoline(client_data, std::string(name, name_length),
-                                    issue_cb, flush_queries_cb, report_latency_results_cb);
+  SystemUnderTestTrampoline* sut = new SystemUnderTestTrampoline(
+      client_data, std::string(name, name_length), issue_cb, flush_queries_cb,
+      report_latency_results_cb);
   return reinterpret_cast<void*>(sut);
 }
 

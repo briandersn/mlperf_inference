@@ -40,7 +40,8 @@ typedef void (*FlushQueriesCallback)();
 typedef void (*ReportLatencyResultsCallback)(ClientData, const int64_t*,
                                              size_t);
 void* ConstructSUT(ClientData client_data, const char* name, size_t name_length,
-                   IssueQueryCallback issue_cb, FlushQueriesCallback flush_queries_cb,
+                   IssueQueryCallback issue_cb,
+                   FlushQueriesCallback flush_queries_cb,
                    ReportLatencyResultsCallback report_latency_results_cb);
 void DestroySUT(void* sut);
 

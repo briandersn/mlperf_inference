@@ -13,24 +13,45 @@ limitations under the License.
 #ifndef MLPERF_LOADGEN_MLPERF_SPEC_CONSTANTS_H
 #define MLPERF_LOADGEN_MLPERF_SPEC_CONSTANTS_H
 
-#include <stddef.h>
+// WARNING: Keep in mind that the exact settings to use for submission
+//          purposes have not been finalized.
+//
+// The functions defined in this header are the only functions in the loadgen
+// that are aware of the MLPerf model categories and associated constants
+// for minimum runtime, minimum queries, target latencies, etc.
+//
+// Using the functions here is the easiest way to make sure your
+// TestSettings will be valid for submission and have the most up-to-date
+// requirements.
+
 #include <stdint.h>
 
+#include "test_settings.h"
+
 namespace mlperf {
+namespace spec {
+namespace v0_5 {
 
-constexpr uint64_t kDefaultQslSeed = 0xABCD1234;
-constexpr uint64_t kDefaultSampleSeed = 0x1234ABCD;
-constexpr uint64_t kDefaultScheduleSeed = 0xA1B2C3D4;
+enum class Model {
+  Resnet50_v1_5,
+  MobileNets_v1_224,
+  SSD_ResNet34,
+  SSD_MobileNets_v1,
+  GNMT,
+};
 
-constexpr size_t kMinQueryCountSingleStream = 1024;
-constexpr size_t kMinQueryCountNotSingleStream = 24576;
+// Each of the functions below create TestSettings that will be valid
+// for results submission, as long as they aren't modified before they are
+// passed to mlperf::StartTest().
+TestSettings CreateSingleStreamSettings(Model model,
+                                        uint64_t expected_latency_ns);
+TestSettings CreateMultiStreamSettings(Model model, int samples_per_query);
+TestSettings CreateServerSettings(Model model, double target_qps,
+                                  bool coalesce_queries);
+TestSettings CreateOfflineSettings(Model model, double expected_qps);
 
-constexpr double kMinPerformanceRunTargetLatencySeconds = 0.05;
-
-constexpr double kMinPerformanceRunDurationSeconds = 60.0;
-
-constexpr double kMultiStreamTargetQPS = 60.0;
-
+}  // namespace v0_5
+}  // namespace spec
 }  // namespace mlperf
 
 #endif  // MLPERF_LOADGEN_MLPERF_SPEC_CONSTANTS_H
