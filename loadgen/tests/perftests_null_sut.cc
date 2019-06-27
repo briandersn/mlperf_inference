@@ -156,12 +156,11 @@ class SystemUnderTestNullPool : public mlperf::SystemUnderTest {
       my_samples.swap(samples_);
       lock.unlock();
 
-      std::vector<mlperf::QuerySampleResponse> responses;
-      responses.reserve(my_samples.size());
+      mlperf::QuerySampleResponse response;
       for (auto s : my_samples) {
-        responses.push_back({s.id, 0, 0});
+        response.id = s.id;
+        mlperf::QuerySamplesComplete(&response, 1);
       }
-      mlperf::QuerySamplesComplete(responses.data(), responses.size());
 
       lock.lock();
       my_samples.clear();
@@ -170,8 +169,8 @@ class SystemUnderTestNullPool : public mlperf::SystemUnderTest {
 
   static constexpr size_t kReserveSampleSize = 1024 * 1024;
   const std::string name_{"NullPool"};
-  const size_t thread_count_ = 4;
-  const std::chrono::milliseconds poll_period_{1};
+  const size_t thread_count_ = 16;
+  const std::chrono::microseconds poll_period_{100};
   std::chrono::high_resolution_clock::time_point next_poll_time_;
 
   std::mutex mutex_;
