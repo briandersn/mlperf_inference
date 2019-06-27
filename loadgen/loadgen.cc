@@ -210,7 +210,8 @@ struct ResponseDelegateDetailed : public ResponseDelegate {
       log.RecordLatency(sample->sequence_id, latency);
       // Disable tracing each sample in offline mode. Since thousands of
       // samples could be overlapping when visualized, it's not very useful.
-      if (scenario != TestScenario::Server && scenario != TestScenario::Offline) {
+      if (scenario != TestScenario::Server &&
+          scenario != TestScenario::Offline) {
         log.TraceSample("Sample", sample->sequence_id, query->scheduled_time,
                         complete_begin_time, "sample_seq", sample->sequence_id,
                         "query_seq", query->sequence_id, "sample_idx",
@@ -360,18 +361,33 @@ std::vector<QueryMetadata> GenerateQueries(
 
 // Template for the QueryScheduler. This base template should never be used
 // since each scenario has its own specialization.
+// QuerySchedulers have the following responsibilities:
+//   * Sleeping until it's time to send the current query.
+//   * Coallescing queries.
+//   * Reporting the time used to determine the end of a test.
 template <TestScenario scenario>
 struct QueryScheduler {
   static_assert(scenario != scenario, "Unhandled TestScenario");
 };
 
+enum class CoalesceQuery {
+  No,    // Send query and advance.
+  Yes,   // Advance to next query without sending.
+  Done,  // Send coalesced query. Do not advance to next query.
+};
+
 // SingleStream QueryScheduler
 template <>
 struct QueryScheduler<TestScenario::SingleStream> {
-  QueryScheduler(const TestSettingsInternal& settings,
-                 const PerfClock::time_point) {}
+  QueryScheduler(const TestSettingsInternal& settings) {}
 
-  PerfClock::time_point Wait(QueryMetadata* next_query) {
+  PerfClock::time_point StartTest() {
+    return PerfClock::now();
+  }
+
+  void StartNextIssueQuery() {}
+
+  CoalesceQuery Wait(QueryMetadata* next_query) {
     auto trace =
         MakeScopedTracer([](AsyncLog& log) { log.ScopedTrace("Waiting"); });
     if (prev_query != nullptr) {
@@ -379,13 +395,19 @@ struct QueryScheduler<TestScenario::SingleStream> {
     }
     prev_query = next_query;
 
-    auto now = PerfClock::now();
-    next_query->scheduled_time = now;
-    next_query->issued_start_time = now;
-    return now;
+    last_now_ = PerfClock::now();
+    next_query->scheduled_time = last_now_;
+    next_query->issued_start_time = last_now_;
+    return CoalesceQuery::No;
   }
 
+  std::vector<QuerySample>& QueryToSend() { return prev_query->query_to_send; }
+
+  PerfClock::time_point LastNow() { return last_now_; }
+
+ private:
   QueryMetadata* prev_query = nullptr;
+  PerfClock::time_point last_now_;
 };
 
 enum class MultiStreamFrequency { Fixed, Free };
@@ -393,13 +415,18 @@ enum class MultiStreamFrequency { Fixed, Free };
 // MultiStream QueryScheduler
 template <>
 struct QueryScheduler<TestScenario::MultiStream> {
-  QueryScheduler(const TestSettingsInternal& settings,
-                 const PerfClock::time_point start)
+  QueryScheduler(const TestSettingsInternal& settings)
       : qps(settings.target_qps),
-        max_async_queries(settings.max_async_queries),
-        start_time(start) {}
+        max_async_queries(settings.max_async_queries){}
 
-  PerfClock::time_point Wait(QueryMetadata* next_query) {
+  PerfClock::time_point StartTest() {
+    test_start_time_ = PerfClock::now();
+    return test_start_time_;
+  }
+
+  void StartNextIssueQuery() {}
+
+  CoalesceQuery Wait(QueryMetadata* next_query) {
     {
       prev_queries.push(next_query);
       auto trace =
@@ -422,7 +449,7 @@ struct QueryScheduler<TestScenario::MultiStream> {
       do {
         i_period++;
         tick_time =
-            start_time + SecondsToDuration<PerfClock::duration>(i_period / qps);
+            test_start_time_ + SecondsToDuration<PerfClock::duration>(i_period / qps);
         Log([tick_time](AsyncLog& log) {
           log.TraceAsyncInstant("QueryInterval", 0, tick_time);
         });
@@ -432,26 +459,39 @@ struct QueryScheduler<TestScenario::MultiStream> {
       std::this_thread::sleep_until(tick_time);
     }
 
-    auto now = PerfClock::now();
-    next_query->issued_start_time = now;
-    return now;
+    last_now_ = PerfClock::now();
+    next_query->issued_start_time = last_now_;
+    return CoalesceQuery::No;
   }
 
+  std::vector<QuerySample>& QueryToSend() {
+    return prev_queries.back()->query_to_send;
+  }
+
+  PerfClock::time_point LastNow() { return last_now_; }
+
+ private:
   size_t i_period = 0;
   double qps;
   const size_t max_async_queries;
-  PerfClock::time_point start_time;
+  PerfClock::time_point test_start_time_;
   std::queue<QueryMetadata*> prev_queries;
+  PerfClock::time_point last_now_;
 };
 
 // MultiStreamFree QueryScheduler
 template <>
 struct QueryScheduler<TestScenario::MultiStreamFree> {
-  QueryScheduler(const TestSettingsInternal& settings,
-                 const PerfClock::time_point start)
+  QueryScheduler(const TestSettingsInternal& settings)
       : max_async_queries(settings.max_async_queries) {}
 
-  PerfClock::time_point Wait(QueryMetadata* next_query) {
+  PerfClock::time_point StartTest() {
+    return PerfClock::now();
+  }
+
+  void StartNextIssueQuery() {}
+
+  CoalesceQuery Wait(QueryMetadata* next_query) {
     bool schedule_time_needed = true;
     {
       prev_queries.push(next_query);
@@ -465,57 +505,137 @@ struct QueryScheduler<TestScenario::MultiStreamFree> {
       }
     }
 
-    auto now = PerfClock::now();
+    last_now_ = PerfClock::now();
     if (schedule_time_needed) {
-      next_query->scheduled_time = now;
+      next_query->scheduled_time = last_now_;
     }
-    next_query->issued_start_time = now;
-    return now;
+    next_query->issued_start_time = last_now_;
+    return CoalesceQuery::No;
   }
 
+  std::vector<QuerySample>& QueryToSend() {
+    return prev_queries.back()->query_to_send;
+  }
+
+  PerfClock::time_point LastNow() { return last_now_; }
+
+ private:
   const size_t max_async_queries;
   std::queue<QueryMetadata*> prev_queries;
+  PerfClock::time_point last_now_;
 };
 
 // Server QueryScheduler
 template <>
 struct QueryScheduler<TestScenario::Server> {
-  QueryScheduler(const TestSettingsInternal& settings,
-                 const PerfClock::time_point start)
-      : start(start) {}
-
-  // TODO: Coalesce all queries whose scheduled timestamps have passed.
-  PerfClock::time_point Wait(QueryMetadata* next_query) {
-    auto trace =
-        MakeScopedTracer([](AsyncLog& log) { log.ScopedTrace("Scheduling"); });
-
-    auto scheduled_time = start + next_query->scheduled_delta;
-    next_query->scheduled_time = scheduled_time;
-    std::this_thread::sleep_until(scheduled_time);
-
-    auto now = PerfClock::now();
-    next_query->issued_start_time = now;
-    return now;
+  QueryScheduler(const TestSettingsInternal& settings) {
+    queries_coalesced_.reserve(1024);
+    query_to_send_coalesced_.reserve(1024);
   }
 
-  const PerfClock::time_point start;
+  PerfClock::time_point StartTest() {
+    test_start_time_ = PerfClock::now();
+    return test_start_time_;
+  }
+
+  void StartNextIssueQuery() {
+    coalescing_ = CoalesceQuery::No;
+    queries_coalesced_.clear();
+    query_to_send_coalesced_.clear();
+    query_scheduled_ = nullptr;
+    coalesce_time_ = PerfClock::now();
+  }
+
+  CoalesceQuery Wait(QueryMetadata* next_query) {
+    auto scheduled_time = test_start_time_ + next_query->scheduled_delta;
+    next_query->scheduled_time = scheduled_time;
+
+    if (coalescing_ == CoalesceQuery::Yes || scheduled_time <= coalesce_time_) {
+      coalescing_ = CoalesceQuery::Yes;
+      if (scheduled_time <= coalesce_time_) {
+        queries_coalesced_.push_back(next_query);
+        auto& query_to_coalesce = next_query->query_to_send;
+        query_to_send_coalesced_.insert(query_to_send_coalesced_.end(),
+                                        query_to_coalesce.begin(),
+                                        query_to_coalesce.end());
+        return CoalesceQuery::Yes;
+      }
+
+      auto trace = MakeScopedTracer(
+          [coalesce_count = queries_coalesced_.size()](AsyncLog& log) {
+            log.ScopedTrace("CoalescingEnd", "coalesce_count", coalesce_count);
+          });
+
+      last_scheduled_time_ = coalesce_time_;
+      auto issue_time = PerfClock::now();
+      for (QueryMetadata* query : queries_coalesced_) {
+        query->issued_start_time = issue_time;
+      }
+      return CoalesceQuery::Done;
+    }
+
+    auto trace =
+        MakeScopedTracer([](AsyncLog& log) { log.ScopedTrace("Scheduling"); });
+    query_scheduled_ = next_query;
+    std::this_thread::sleep_until(scheduled_time);
+    last_scheduled_time_ = scheduled_time;
+    next_query->issued_start_time = PerfClock::now();
+
+    return CoalesceQuery::No;
+  }
+
+  std::vector<QuerySample>& QueryToSend() {
+    return coalescing_ == CoalesceQuery::Yes ? query_to_send_coalesced_
+                                             : query_scheduled_->query_to_send;
+  }
+
+  PerfClock::time_point LastNow() {
+    // Return last_scheduled_time_ here since the end of the Server scenario
+    // should depend on the scheduled timeline, not the issued timeline.
+    return last_scheduled_time_;
+  }
+
+ private:
+  PerfClock::time_point test_start_time_;
+  PerfClock::time_point coalesce_time_;
+  CoalesceQuery coalescing_ = CoalesceQuery::No;
+  std::vector<QueryMetadata*> queries_coalesced_;
+  std::vector<QuerySample> query_to_send_coalesced_;
+  QueryMetadata* query_scheduled_ = nullptr;
+  PerfClock::time_point last_scheduled_time_;
 };
 
 // Offline QueryScheduler
 template <>
 struct QueryScheduler<TestScenario::Offline> {
-  QueryScheduler(const TestSettingsInternal& settings,
-                 const PerfClock::time_point start)
-      : start(start) {}
+  QueryScheduler(const TestSettingsInternal& settings) {}
 
-  PerfClock::time_point Wait(QueryMetadata* next_query) {
-    next_query->scheduled_time = start;
-    auto now = PerfClock::now();
-    next_query->issued_start_time = now;
-    return now;
+  PerfClock::time_point StartTest() {
+    test_start_time_ = PerfClock::now();
+    return test_start_time_;
   }
 
-  const PerfClock::time_point start;
+  void StartNextIssueQuery() {}
+
+  CoalesceQuery Wait(QueryMetadata* next_query) {
+    current_query_ = next_query;
+    current_query_->scheduled_time = test_start_time_;
+    last_now_ = PerfClock::now();
+    current_query_->issued_start_time = last_now_;
+    // Offline queries are already coalesced by GenerateQueries.
+    return CoalesceQuery::No;
+  }
+
+  std::vector<QuerySample>& QueryToSend() {
+    return current_query_->query_to_send;
+  }
+
+  PerfClock::time_point LastNow() { return last_now_; }
+
+ private:
+  PerfClock::time_point test_start_time_;
+  PerfClock::time_point last_now_;
+  QueryMetadata* current_query_ = nullptr;
 };
 
 // Provides performance results that are independent of scenario
@@ -552,29 +672,43 @@ PerformanceResult IssueQueries(SystemUnderTest* sut,
   const size_t max_queries_outstanding =
       settings.target_qps * query_seconds_outstanding_threshold;
 
-  const PerfClock::time_point start = PerfClock::now();
-  PerfClock::time_point last_now = start;
-  QueryScheduler<scenario> query_scheduler(settings, start);
+  QueryScheduler<scenario> query_scheduler(settings);
+  auto test_start_time = query_scheduler.StartTest();
 
-  for (auto& query : queries) {
+  for (auto query = queries.begin(); query != queries.end();) {
     auto trace1 =
         MakeScopedTracer([](AsyncLog& log) { log.ScopedTrace("SampleLoop"); });
-    last_now = query_scheduler.Wait(&query);
+
+    query_scheduler.StartNextIssueQuery();
+    CoalesceQuery coalesce = query_scheduler.Wait(&*query);
+    if (coalesce == CoalesceQuery::No) {
+      query++;
+      queries_issued++;
+    } else {
+      while (coalesce == CoalesceQuery::Yes) {
+        queries_issued++;
+        if (++query == queries.end()) {
+          break;
+        }
+        // We don't increment |query| at the end of a coallesced series
+        // since we need to retry it for the next IssueQuery.
+        coalesce = query_scheduler.Wait(&*query);
+      }
+    }
 
     // Issue the query to the SUT.
     {
       auto trace3 = MakeScopedTracer(
           [](AsyncLog& log) { log.ScopedTrace("IssueQuery"); });
-      sut->IssueQuery(query.query_to_send);
+      sut->IssueQuery(query_scheduler.QueryToSend());
     }
 
-    queries_issued++;
     if (mode == TestMode::AccuracyOnly) {
       // TODO: Rate limit in accuracy mode.
       continue;
     }
 
-    auto duration = (last_now - start);
+    auto duration = (query_scheduler.LastNow() - test_start_time);
     if (queries_issued >= settings.min_query_count &&
         duration > settings.min_duration) {
       LogDetail([](AsyncLog& log) {
@@ -645,9 +779,9 @@ PerformanceResult IssueQueries(SystemUnderTest* sut,
   double final_query_scheduled_time =
       DurationToSeconds(final_query.scheduled_delta);
   double final_query_issued_time =
-      DurationToSeconds(final_query.issued_start_time - start);
+      DurationToSeconds(final_query.issued_start_time - test_start_time);
   double final_query_all_samples_done_time =
-      DurationToSeconds(final_query.all_samples_done_time - start);
+      DurationToSeconds(final_query.all_samples_done_time - test_start_time);
   return PerformanceResult{std::move(latencies),
                            queries_issued,
                            max_latency,
