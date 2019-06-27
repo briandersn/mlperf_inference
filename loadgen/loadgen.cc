@@ -210,9 +210,7 @@ struct ResponseDelegateDetailed : public ResponseDelegate {
       log.RecordLatency(sample->sequence_id, latency);
       // Disable tracing each sample in offline mode. Since thousands of
       // samples could be overlapping when visualized, it's not very useful.
-      // TODO: Should we disable for cloud mode as well? Sufficiently
-      // out-of-order processing could have lots of overlap too.
-      if (scenario != TestScenario::Offline) {
+      if (scenario != TestScenario::Server && scenario != TestScenario::Offline) {
         log.TraceSample("Sample", sample->sequence_id, query->scheduled_time,
                         complete_begin_time, "sample_seq", sample->sequence_id,
                         "query_seq", query->sequence_id, "sample_idx",
