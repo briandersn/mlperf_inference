@@ -599,6 +599,9 @@ TlsLogger::TlsLogger(std::function<void()> forced_detatch)
   tid_as_string_ = ss.str();
   trace_pid_tid_ = "\"pid\": " + std::to_string(MLPERF_GET_PID()) + ", " +
                    "\"tid\": " + tid_as_string_ + ", ";
+  for (auto& e : entries_) {
+    e.reserve(1024 * 1024);
+  }
 }
 
 TlsLogger::~TlsLogger() {}
