@@ -88,6 +88,24 @@ const std::string ArgValueTransform(const LogBinaryAsHexString& value) {
   return hex;
 }
 
+std::vector<QuerySampleLatency> AsyncLog::GetLatenciesBlocking(
+    size_t expected_count) {
+  std::vector<QuerySampleLatency> latencies;
+  std::unique_lock<std::mutex> lock(latencies_mutex_);
+  latencies_expected_ = expected_count;
+  while (!AllLatenciesRecorded()) {
+    all_latencies_recorded_.wait_for(lock, std::chrono::seconds(1),
+                                     [&] { return AllLatenciesRecorded(); });
+    Log([time = PerfClock::now(),
+         delta = latencies_expected_ - latencies_recorded_](AsyncLog& log) {
+      log.TraceAsyncInstant("GetLatenciesBlocking", 0, time, "latencies_left",
+                            delta);
+    });
+  }
+  latencies.swap(latencies_);
+  return latencies;
+}
+
 // TlsLogger logs a single thread using thread-local storage.
 // Submits logs to the central Logger:
 //   * With forward-progress guarantees. (i.e.: no locking or blocking

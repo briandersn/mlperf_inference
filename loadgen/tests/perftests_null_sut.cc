@@ -11,7 +11,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include <future>
-#include <queue>
+#include <list>
 
 #include "../loadgen.h"
 #include "../query_sample_library.h"
@@ -62,15 +62,10 @@ class QuerySampleLibraryNull : public mlperf::QuerySampleLibrary {
   std::string name_{"NullQSL"};
 };
 
-void TestSingleStream() {
+void TestSingleStream(const mlperf::LogSettings& log_settings) {
   SystemUnderTestNull null_sut;
   QuerySampleLibraryNull null_qsl;
-
-  mlperf::LogSettings log_settings;
-  log_settings.log_output.prefix_with_datetime = true;
-
   mlperf::TestSettings ts;
-
   mlperf::StartTest(&null_sut, &null_qsl, ts, log_settings);
 }
 
@@ -97,19 +92,13 @@ class SystemUnderTestNullStdAsync : public mlperf::SystemUnderTest {
   std::vector<std::future<void>> futures_;
 };
 
-void TestServerStdAsync() {
+void TestServerStdAsync(const mlperf::LogSettings& log_settings) {
   SystemUnderTestNullStdAsync null_std_async_sut;
   QuerySampleLibraryNull null_qsl;
-
-  mlperf::LogSettings log_settings;
-  log_settings.log_output.prefix_with_datetime = true;
-  log_settings.log_output.copy_summary_to_stdout = true;
-
   mlperf::TestSettings ts;
   ts.scenario = mlperf::TestScenario::Server;
   ts.server_target_qps = 2000000;
   ts.min_duration_ms = 100;
-
   mlperf::StartTest(&null_std_async_sut, &null_qsl, ts, log_settings);
 }
 
@@ -117,7 +106,7 @@ class SystemUnderTestNullPool : public mlperf::SystemUnderTest {
  public:
   SystemUnderTestNullPool() {
     next_poll_time_ = std::chrono::high_resolution_clock::now();
-    issued_samples_queue_.emplace();
+    issued_samples_queue_.emplace_back();
     issued_samples_queue_.back().reserve(kReserveSampleSize);
     for (size_t i = 0; i < kRecycleStackMinSize * 2; i++) {
       recycled_samples_stack_.emplace_back();
@@ -142,53 +131,77 @@ class SystemUnderTestNullPool : public mlperf::SystemUnderTest {
   const std::string& Name() const override { return name_; }
 
   void IssueQuery(const std::vector<mlperf::QuerySample>& samples) override {
-    std::unique_lock<std::mutex> lock(mutex_);
-    std::vector<mlperf::QuerySample>* batch = &issued_samples_queue_.back();
-    if (batch->size() + samples.size() <= kReserveSampleSize) {
-      batch->insert(batch->end(), samples.begin(), samples.end());
-    } else {
-      for (auto& s : samples) {
-        if (batch->size() == kReserveSampleSize) {
-          batch = QueueNewIssueSetLocked();
-          lock.unlock();
-          lock.lock();
-        }
-        batch->push_back(s);
+    bool need_new_set = false;
+    std::vector<mlperf::QuerySample> set;
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      if (issued_samples_queue_.back().size() < kReserveSampleSize) {
+        set = std::move(issued_samples_queue_.back());
+        issued_samples_queue_.pop_back();
+      } else {
+        need_new_set = true;
       }
     }
+
+    for (auto& s : samples) {
+      if (need_new_set) {
+        need_new_set = false;
+        std::unique_lock<std::mutex> lock(mutex_);
+        set = GetNewIssueSetLocked();
+      }
+      set.push_back(s);
+      if (set.size() >= kReserveSampleSize) {
+        need_new_set = true;
+        std::unique_lock<std::mutex> lock(mutex_);
+        issued_samples_queue_.push_back(std::move(set));
+      }
+    }
+
+    if (!need_new_set) {
+      std::unique_lock<std::mutex> lock(mutex_);
+      issued_samples_queue_.push_back(std::move(set));
+    }
+
+    cv_.notify_all();
   }
 
   void ReportLatencyResults(
       const std::vector<mlperf::QuerySampleLatency>& latencies_ns) override {}
 
  private:
-  std::vector<mlperf::QuerySample>* QueueNewIssueSetLocked() {
+  std::vector<mlperf::QuerySample> GetNewIssueSetLocked() {
+    std::vector<mlperf::QuerySample> set;
     if (recycled_samples_stack_.empty()) {
-      issued_samples_queue_.emplace();
-      issued_samples_queue_.back().reserve(kReserveSampleSize);
+      set.reserve(kReserveSampleSize);
     } else {
-      issued_samples_queue_.push(std::move(recycled_samples_stack_.back()));
+      set = std::move(recycled_samples_stack_.back());
       recycled_samples_stack_.pop_back();
     }
-    return &issued_samples_queue_.back();
+    return set;
   }
 
   void WorkerThread() {
     std::unique_lock<std::mutex> lock(mutex_);
     while (keep_workers_alive_) {
-      if (issued_samples_queue_.size() == 1) {
+      if (issued_samples_queue_.size() <= 1) {
         next_poll_time_ += poll_period_;
         auto my_wakeup_time = next_poll_time_;
-        cv_.wait_until(lock, my_wakeup_time,
-                       [&]() { return !keep_workers_alive_; });
+        cv_.wait_until(lock, my_wakeup_time, [&]() {
+          return !keep_workers_alive_ ||
+                 (!issued_samples_queue_.empty() &&
+                  !issued_samples_queue_.front().empty());
+        });
       } else {
-        next_poll_time_ = std::chrono::high_resolution_clock::now() + poll_period_;
+        next_poll_time_ =
+            std::chrono::high_resolution_clock::now() + poll_period_;
       }
 
-      std::vector<mlperf::QuerySample> my_samples(std::move(issued_samples_queue_.front()));
-      issued_samples_queue_.pop();
-      QueueNewIssueSetLocked();
-      bool recycled_stack_getting_low = recycled_samples_stack_.size() < kRecycleStackMinSize;
+      std::vector<mlperf::QuerySample> my_samples(
+          std::move(issued_samples_queue_.front()));
+      issued_samples_queue_.pop_front();
+      issued_samples_queue_.push_back(GetNewIssueSetLocked());
+      bool recycled_stack_getting_low =
+          recycled_samples_stack_.size() < kRecycleStackMinSize;
       lock.unlock();
 
       mlperf::QuerySampleResponse response;
@@ -224,30 +237,29 @@ class SystemUnderTestNullPool : public mlperf::SystemUnderTest {
   bool keep_workers_alive_ = true;
   std::vector<std::thread> threads_;
 
-  std::queue<std::vector<mlperf::QuerySample>> issued_samples_queue_;
+  std::list<std::vector<mlperf::QuerySample>> issued_samples_queue_;
 
   std::vector<std::vector<mlperf::QuerySample>> recycled_samples_stack_;
 };
 
-void TestServerPool() {
+void TestServerPool(const mlperf::LogSettings& log_settings) {
   SystemUnderTestNullPool null_pool;
   QuerySampleLibraryNull null_qsl;
-
-  mlperf::LogSettings log_settings;
-  log_settings.log_output.prefix_with_datetime = true;
-  log_settings.log_output.copy_summary_to_stdout = true;
-
   mlperf::TestSettings ts;
   ts.scenario = mlperf::TestScenario::Server;
   ts.server_target_qps = 6000000;
   ts.min_duration_ms = 100;
-
   mlperf::StartTest(&null_pool, &null_qsl, ts, log_settings);
 }
 
 int main(int argc, char* argv[]) {
-  TestSingleStream();
-  TestServerStdAsync();
-  TestServerPool();
+  mlperf::LogSettings log_settings;
+  log_settings.log_output.prefix_with_datetime = true;
+  log_settings.log_output.copy_summary_to_stdout = true;
+  log_settings.log_output.outdir = "logs";
+  TestSingleStream(log_settings);
+  TestServerStdAsync(log_settings);
+  TestServerPool(log_settings);
+  TestServerPool(log_settings);
   return 0;
 }

@@ -325,14 +325,7 @@ class AsyncLog {
     max_latency_ = 0;
   }
 
-  std::vector<QuerySampleLatency> GetLatenciesBlocking(size_t expected_count) {
-    std::vector<QuerySampleLatency> latencies;
-    std::unique_lock<std::mutex> lock(latencies_mutex_);
-    latencies_expected_ = expected_count;
-    all_latencies_recorded_.wait(lock, [&] { return AllLatenciesRecorded(); });
-    latencies.swap(latencies_);
-    return latencies;
-  }
+  std::vector<QuerySampleLatency> GetLatenciesBlocking(size_t expected_count);
 
   QuerySampleLatency GetMaxLatencySoFar() {
     return max_latency_.load(std::memory_order_release);
