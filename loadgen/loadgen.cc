@@ -182,6 +182,13 @@ struct DurationGeneratorNs {
   }
 };
 
+// ResponseDelegateWarmUp disables logging and latency tracking.
+struct ResponseDelegateWarmUp : public ResponseDelegate {
+  void SampleComplete(SampleMetadata* sample, QuerySampleResponse* response,
+                      PerfClock::time_point complete_begin_time) override {}
+  void QueryComplete() override {}
+};
+
 // Right now, this is the only implementation of ResponseDelegate,
 // but more will be coming soon.
 template <TestScenario scenario, TestMode mode>
@@ -386,9 +393,7 @@ template <>
 struct QueryScheduler<TestScenario::SingleStream> {
   QueryScheduler(const TestSettingsInternal& settings) {}
 
-  PerfClock::time_point StartTest() {
-    return PerfClock::now();
-  }
+  PerfClock::time_point StartTest() { return PerfClock::now(); }
 
   void StartNextIssueQuery() {}
 
@@ -422,7 +427,7 @@ template <>
 struct QueryScheduler<TestScenario::MultiStream> {
   QueryScheduler(const TestSettingsInternal& settings)
       : qps(settings.target_qps),
-        max_async_queries(settings.max_async_queries){}
+        max_async_queries(settings.max_async_queries) {}
 
   PerfClock::time_point StartTest() {
     test_start_time_ = PerfClock::now();
@@ -453,8 +458,8 @@ struct QueryScheduler<TestScenario::MultiStream> {
       PerfClock::time_point tick_time;
       do {
         i_period++;
-        tick_time =
-            test_start_time_ + SecondsToDuration<PerfClock::duration>(i_period / qps);
+        tick_time = test_start_time_ +
+                    SecondsToDuration<PerfClock::duration>(i_period / qps);
         Log([tick_time](AsyncLog& log) {
           log.TraceAsyncInstant("QueryInterval", 0, tick_time);
         });
@@ -490,9 +495,7 @@ struct QueryScheduler<TestScenario::MultiStreamFree> {
   QueryScheduler(const TestSettingsInternal& settings)
       : max_async_queries(settings.max_async_queries) {}
 
-  PerfClock::time_point StartTest() {
-    return PerfClock::now();
-  }
+  PerfClock::time_point StartTest() { return PerfClock::now(); }
 
   void StartNextIssueQuery() {}
 
@@ -533,9 +536,11 @@ struct QueryScheduler<TestScenario::MultiStreamFree> {
 // Server QueryScheduler
 template <>
 struct QueryScheduler<TestScenario::Server> {
+  static constexpr size_t kMaxCoalesceCount = 1024;
+
   QueryScheduler(const TestSettingsInternal& settings) {
-    queries_coalesced_.reserve(1024);
-    query_to_send_coalesced_.reserve(1024);
+    queries_coalesced_.reserve(kMaxCoalesceCount);
+    query_to_send_coalesced_.reserve(kMaxCoalesceCount);
   }
 
   PerfClock::time_point StartTest() {
@@ -557,7 +562,8 @@ struct QueryScheduler<TestScenario::Server> {
 
     if (coalescing_ == CoalesceQuery::Yes || scheduled_time <= coalesce_time_) {
       coalescing_ = CoalesceQuery::Yes;
-      if (scheduled_time <= coalesce_time_) {
+      if (scheduled_time <= coalesce_time_ &&
+          queries_coalesced_.size() < kMaxCoalesceCount) {
         queries_coalesced_.push_back(next_query);
         auto& query_to_coalesce = next_query->query_to_send;
         query_to_send_coalesced_.insert(query_to_send_coalesced_.end(),
@@ -685,20 +691,17 @@ PerformanceResult IssueQueries(SystemUnderTest* sut,
         MakeScopedTracer([](AsyncLog& log) { log.ScopedTrace("SampleLoop"); });
 
     query_scheduler.StartNextIssueQuery();
-    CoalesceQuery coalesce = query_scheduler.Wait(&*query);
-    if (coalesce == CoalesceQuery::No) {
+    if (query_scheduler.Wait(&*query) == CoalesceQuery::Yes) {
+      // We don't increment |query| at the end of a coalesced series
+      // since we need to retry it for the next IssueQuery.
+      do {
+        query++;
+        queries_issued++;
+      } while (query != queries.end() &&
+               query_scheduler.Wait(&*query) != CoalesceQuery::Done);
+    } else {
       query++;
       queries_issued++;
-    } else {
-      while (coalesce == CoalesceQuery::Yes) {
-        queries_issued++;
-        if (++query == queries.end()) {
-          break;
-        }
-        // We don't increment |query| at the end of a coallesced series
-        // since we need to retry it for the next IssueQuery.
-        coalesce = query_scheduler.Wait(&*query);
-      }
     }
 
     // Issue the query to the SUT.

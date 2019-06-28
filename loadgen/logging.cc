@@ -150,7 +150,15 @@ std::vector<QuerySampleLatency> AsyncLog::GetLatenciesBlocking(
   {
     std::unique_lock<std::mutex> lock(latencies_mutex_);
     latencies_expected_ = expected_count;
-    all_latencies_recorded_.wait(lock, [&] { return AllLatenciesRecorded(); });
+    while (!AllLatenciesRecorded()) {
+      all_latencies_recorded_.wait_for(lock, std::chrono::seconds(1),
+                                       [&] { return AllLatenciesRecorded(); });
+      Log([time = PerfClock::now(),
+           delta = latencies_expected_ - latencies_recorded_](AsyncLog& log) {
+        log.TraceAsyncInstant("GetLatenciesBlocking", 0, time, "latencies_left",
+                              delta);
+      });
+    }
     latencies.swap(latencies_);
   }
 
