@@ -20,7 +20,10 @@ limitations under the License.
 
 namespace mlperf {
 
+namespace logging {
 class AsyncSummary;
+}
+using AsyncSummary = logging::AsyncSummary;
 
 std::string ToString(TestScenario scenario);
 std::string ToString(TestMode mode);

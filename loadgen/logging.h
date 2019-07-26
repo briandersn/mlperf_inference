@@ -33,6 +33,8 @@ limitations under the License.
 
 namespace mlperf {
 
+namespace logging {
+
 class AsyncLog;
 class Logger;
 class TlsLogger;
@@ -501,6 +503,41 @@ void AsyncLog::LogDetail(const std::string& message, const Args... args) {
     }
   }
   error_flagged_ = false;
+}
+
+}  // namespace logging
+
+// Export some things out of the logging namespace to simplify call sites.
+
+const auto GlobalLogger = logging::GlobalLogger;
+const auto Log = logging::Log;
+
+using PerfClock = logging::PerfClock;
+
+using LogBinaryAsHexString = logging::LogBinaryAsHexString;
+
+using AsyncLog = logging::AsyncLog;
+
+using AsyncSummary = logging::AsyncSummary;
+template <typename LambdaT>
+void LogSummary(LambdaT&& lambda) {
+  logging::LogSummary(std::forward<LambdaT>(lambda));
+}
+
+using AsyncDetail = logging::AsyncDetail;
+template <typename LambdaT>
+void LogDetail(LambdaT&& lambda) {
+  logging::LogDetail(std::forward<LambdaT>(lambda));
+}
+
+using AsyncTrace = logging::AsyncTrace;
+
+template <typename LambdaT>
+using ScopedTracer = logging::ScopedTracer<LambdaT>;
+
+template <typename LambdaT>
+auto MakeScopedTracer(LambdaT&& lambda) -> ScopedTracer<LambdaT> {
+  return ScopedTracer<LambdaT>(std::forward<LambdaT>(lambda));
 }
 
 }  // namespace mlperf

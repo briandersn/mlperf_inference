@@ -72,6 +72,8 @@ limitations under the License.
     return false;                                      \
   }();
 
+namespace testing {
+
 template <typename TestT>
 struct TestProxy {
   template <typename... Args>
@@ -165,3 +167,7 @@ class Test {
     Log(std::forward<Args>(args)...);
   }
 };
+
+}  // namespace testing
+
+using namespace testing;

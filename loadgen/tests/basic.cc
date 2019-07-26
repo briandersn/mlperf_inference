@@ -24,6 +24,8 @@ limitations under the License.
 #include "../test_settings.h"
 #include "loadgen_test.h"
 
+namespace unit_tests {
+
 // SystemUnderTestBasic implements the client interfaces of the loadgen and
 // has some basic sanity checks that are enabled for all tests.
 // It also forwards calls to overrideable *Ext methods and implements
@@ -275,3 +277,5 @@ REGISTER_TEST(MultiStream_RemainderQueryContiguous,
 REGISTER_TEST(MultiStreamFree_RemainderQueryContiguous,
               TestProxy<TestMultiStreamContiguousRemainderQuery>(),
               mlperf::TestScenario::MultiStreamFree);
+
+}  // namespace unit_tests

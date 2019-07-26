@@ -40,6 +40,7 @@ limitations under the License.
 #include "utils.h"
 
 namespace mlperf {
+namespace logging {
 
 namespace {
 
@@ -847,4 +848,5 @@ void Log(AsyncLogEntry&& entry) {
   tls_logger->Log(std::forward<AsyncLogEntry>(entry));
 }
 
+}  // namespace logging
 }  // namespace mlperf

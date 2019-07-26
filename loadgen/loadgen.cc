@@ -36,6 +36,7 @@ limitations under the License.
 #include "version.h"
 
 namespace mlperf {
+namespace loadgen {
 
 struct SampleMetadata;
 struct QueryMetadata;
@@ -150,30 +151,6 @@ class QueryMetadata {
   std::promise<void> all_samples_done_;
   std::vector<SampleMetadata> samples_;
 };
-
-void QuerySamplesComplete(QuerySampleResponse* responses,
-                          size_t response_count) {
-  PerfClock::time_point timestamp = PerfClock::now();
-
-  auto tracer = MakeScopedTracer(
-      [](AsyncTrace& trace) { trace("QuerySamplesComplete"); });
-
-  const QuerySampleResponse* end = responses + response_count;
-
-  // Notify first to unblock loadgen production ASAP.
-  for (QuerySampleResponse* response = responses; response < end; response++) {
-    SampleMetadata* sample = reinterpret_cast<SampleMetadata*>(response->id);
-    QueryMetadata* query = sample->query_metadata;
-    query->NotifyOneSampleCompleted(timestamp);
-  }
-
-  // Log samples.
-  for (QuerySampleResponse* response = responses; response < end; response++) {
-    SampleMetadata* sample = reinterpret_cast<SampleMetadata*>(response->id);
-    QueryMetadata* query = sample->query_metadata;
-    query->response_delegate->SampleComplete(sample, response, timestamp);
-  }
-}
 
 struct DurationGeneratorNs {
   const PerfClock::time_point start;
@@ -1168,6 +1145,8 @@ struct LogOutputs {
   std::ofstream trace_out;
 };
 
+}  // namespace loadgen
+
 void StartTest(SystemUnderTest* sut, QuerySampleLibrary* qsl,
                const TestSettings& requested_settings,
                const LogSettings& log_settings) {
@@ -1175,7 +1154,7 @@ void StartTest(SystemUnderTest* sut, QuerySampleLibrary* qsl,
 
   const std::string test_date_time = CurrentDateTimeISO8601();
 
-  LogOutputs log_outputs(log_settings.log_output, test_date_time);
+  loadgen::LogOutputs log_outputs(log_settings.log_output, test_date_time);
   if (!log_outputs.CheckOutputs()) {
     return;
   }
@@ -1197,12 +1176,12 @@ void StartTest(SystemUnderTest* sut, QuerySampleLibrary* qsl,
   TestSettingsInternal sanitized_settings(requested_settings);
   sanitized_settings.LogAllSettings();
 
-  std::vector<LoadableSampleSet> loadable_sets(
-      GenerateLoadableSets(qsl, sanitized_settings));
+  std::vector<loadgen::LoadableSampleSet> loadable_sets(
+      loadgen::GenerateLoadableSets(qsl, sanitized_settings));
 
-  RunFunctions run_funcs = RunFunctions::Get(sanitized_settings.scenario);
+  auto run_funcs = loadgen::RunFunctions::Get(sanitized_settings.scenario);
 
-  SequenceGen sequence_gen;
+  loadgen::SequenceGen sequence_gen;
   switch (sanitized_settings.mode) {
     case TestMode::SubmissionRun:
       run_funcs.accuracy(sut, qsl, sanitized_settings, loadable_sets,
@@ -1228,6 +1207,32 @@ void StartTest(SystemUnderTest* sut, QuerySampleLibrary* qsl,
   GlobalLogger().StopLogging();
   GlobalLogger().StopTracing();
   GlobalLogger().StopIOThread();
+}
+
+void QuerySamplesComplete(QuerySampleResponse* responses,
+                          size_t response_count) {
+  PerfClock::time_point timestamp = PerfClock::now();
+
+  auto tracer = MakeScopedTracer(
+      [](AsyncTrace& trace) { trace("QuerySamplesComplete"); });
+
+  const QuerySampleResponse* end = responses + response_count;
+
+  // Notify first to unblock loadgen production ASAP.
+  for (QuerySampleResponse* response = responses; response < end; response++) {
+    loadgen::SampleMetadata* sample =
+        reinterpret_cast<loadgen::SampleMetadata*>(response->id);
+    loadgen::QueryMetadata* query = sample->query_metadata;
+    query->NotifyOneSampleCompleted(timestamp);
+  }
+
+  // Log samples.
+  for (QuerySampleResponse* response = responses; response < end; response++) {
+    loadgen::SampleMetadata* sample =
+        reinterpret_cast<loadgen::SampleMetadata*>(response->id);
+    loadgen::QueryMetadata* query = sample->query_metadata;
+    query->response_delegate->SampleComplete(sample, response, timestamp);
+  }
 }
 
 }  // namespace mlperf

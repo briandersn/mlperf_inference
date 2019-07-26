@@ -17,6 +17,8 @@ limitations under the License.
 #include "../system_under_test.h"
 #include "../test_settings.h"
 
+namespace perf_tests {
+
 class SystemUnderTestNull : public mlperf::SystemUnderTest {
  public:
   SystemUnderTestNull() = default;
@@ -203,9 +205,11 @@ void TestServerPool() {
   mlperf::StartTest(&null_pool, &null_qsl, ts, log_settings);
 }
 
+}  // namespace perf_tests
+
 int main(int argc, char* argv[]) {
-  TestSingleStream();
-  TestServerStdAsync();
-  TestServerPool();
+  perf_tests::TestSingleStream();
+  perf_tests::TestServerStdAsync();
+  perf_tests::TestServerPool();
   return 0;
 }
