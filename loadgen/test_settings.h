@@ -29,6 +29,9 @@ limitations under the License.
 
 namespace mlperf {
 
+/// \addtogroup LoadgenAPI
+/// @{
+
 ///
 /// \enum TestScenario
 /// * **SingleStream**
@@ -238,6 +241,8 @@ struct LogSettings {
   uint64_t log_mode_async_poll_interval_ms = 1000;  ///< TODO: Implement this.
   bool enable_trace = true;                         ///< TODO: Implement this.
 };
+
+/// @}
 
 }  // namespace mlperf
 

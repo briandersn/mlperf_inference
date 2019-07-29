@@ -303,11 +303,13 @@ QuerySampleLatency AsyncLog::GetMaxLatencySoFar() {
   return max_latency_.load(std::memory_order_release);
 }
 
-// TlsLogger logs a single thread using thread-local storage.
-// Submits logs to the central Logger:
-//   * With forward-progress guarantees. (i.e.: no locking or blocking
-//       operations even if other threads have stalled.
-//   * Without expensive syscalls or I/O operations.
+/// \brief records a single thread using thread-local storage and submits
+/// entries to the central Logger.
+/// \details This setup allows for each log entry to be added:
+///   * With forward-progress guarantees. (i.e.: no locking or blocking
+///       operations even if other threads have stalled.
+///   * Without expensive syscalls or I/O operations, which are deferred to
+///       the central Logger.
 class TlsLogger {
  public:
   TlsLogger(std::function<void()> forced_detatch);
@@ -813,8 +815,8 @@ Logger& GlobalLogger() {
   return g_logger;
 }
 
-// TlsLoggerWrapper moves ownership of the TlsLogger to Logger on thread exit
-// so no round-trip synchronization with the IO thread is required.
+/// \brief moves ownership of the TlsLogger to Logger on thread exit
+/// so no round-trip synchronization with the IO thread is required.
 struct TlsLoggerWrapper {
   TlsLoggerWrapper(std::function<void()> forced_detatch)
       : tls_logger(std::make_unique<TlsLogger>(std::move(forced_detatch))) {

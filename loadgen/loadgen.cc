@@ -41,8 +41,8 @@ namespace loadgen {
 struct SampleMetadata;
 struct QueryMetadata;
 
-// Every query and sample within a call to StartTest gets a unique sequence id
-// for easy cross reference.
+/// \brief Every query and sample within a call to StartTest gets a unique
+/// sequence id for easy cross reference.
 struct SequenceGen {
   uint64_t NextQueryId() { return query_id++; }
   uint64_t NextSampleId() { return sample_id++; }
@@ -53,11 +53,15 @@ struct SequenceGen {
   uint64_t sample_id = 0;
 };
 
+/// \brief A random set of samples in the QSL that should fit in RAM when
+/// loaded together.
 struct LoadableSampleSet {
   std::vector<QuerySampleIndex> set;
   const size_t sample_distribution_end;  // Excludes padding in multi-stream.
 };
 
+/// \brief An interface for a particular scenario + mode to implement for
+/// extended hanlding of sample completion.
 struct ResponseDelegate {
   virtual ~ResponseDelegate() = default;
   virtual void SampleComplete(SampleMetadata*, QuerySampleResponse*,
@@ -65,14 +69,14 @@ struct ResponseDelegate {
   virtual void QueryComplete() = 0;
 };
 
-// SampleMetadata is used by the load generator to coordinate
-// response data and completion.
+/// \brief Used by the loadgen to coordinate response data and completion.
 struct SampleMetadata {
   QueryMetadata* query_metadata;
   uint64_t sequence_id;
   QuerySampleIndex sample_index;
 };
 
+/// \brief Maintains data and timing info for a query and all its samples.
 class QueryMetadata {
  public:
   QueryMetadata(const std::vector<QuerySampleIndex>& query_sample_indices,
@@ -152,6 +156,8 @@ class QueryMetadata {
   std::vector<SampleMetadata> samples_;
 };
 
+/// \brief Generates nanoseconds from a start time to multiple end times.
+/// TODO: This isn't very useful anymore. Remove it.
 struct DurationGeneratorNs {
   const PerfClock::time_point start;
   int64_t delta(PerfClock::time_point end) const {
@@ -160,8 +166,7 @@ struct DurationGeneratorNs {
   }
 };
 
-// Right now, this is the only implementation of ResponseDelegate,
-// but more will be coming soon.
+/// \brief ResponseDelegate implementation templated by scenario and mode.
 template <TestScenario scenario, TestMode mode>
 struct ResponseDelegateDetailed : public ResponseDelegate {
   std::atomic<size_t> queries_completed{0};
@@ -223,7 +228,7 @@ struct ResponseDelegateDetailed : public ResponseDelegate {
   }
 };
 
-// ScheduleDistribution templates by test scenario.
+/// \brief Selects the query timestamps for all scenarios except Server.
 template <TestScenario scenario>
 auto ScheduleDistribution(double qps) {
   return [period = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -232,6 +237,7 @@ auto ScheduleDistribution(double qps) {
   };
 }
 
+/// \brief Selects the query timestamps for the Server scenario.
 template <>
 auto ScheduleDistribution<TestScenario::Server>(double qps) {
   // Poisson arrival process corresponds to exponentially distributed
@@ -242,7 +248,7 @@ auto ScheduleDistribution<TestScenario::Server>(double qps) {
   };
 }
 
-// SampleDistribution templates by test mode.
+/// \brief Selects samples for the accuracy mode.
 template <TestMode mode>
 auto SampleDistribution(size_t sample_count, size_t stride, std::mt19937* rng) {
   std::vector<size_t> indices;
@@ -255,6 +261,7 @@ auto SampleDistribution(size_t sample_count, size_t stride, std::mt19937* rng) {
   };
 }
 
+/// \brief Selects samples for the performance mode.
 template <>
 auto SampleDistribution<TestMode::PerformanceOnly>(size_t sample_count,
                                                    size_t /*stride*/,
@@ -263,6 +270,8 @@ auto SampleDistribution<TestMode::PerformanceOnly>(size_t sample_count,
              auto& gen) mutable { return dist(gen); };
 }
 
+/// \brief Generates queries for the requested settings, templated by
+/// scenario and mode.
 template <TestScenario scenario, TestMode mode>
 std::vector<QueryMetadata> GenerateQueries(
     const TestSettingsInternal& settings,
@@ -353,14 +362,14 @@ std::vector<QueryMetadata> GenerateQueries(
   return queries;
 }
 
-// Template for the QueryScheduler. This base template should never be used
-// since each scenario has its own specialization.
+/// \brief A base template that should never be used since each scenario has
+/// its own specialization.
 template <TestScenario scenario>
 struct QueryScheduler {
   static_assert(scenario != scenario, "Unhandled TestScenario");
 };
 
-// SingleStream QueryScheduler
+/// \brief Schedules queries for issuance in the single stream scenario.
 template <>
 struct QueryScheduler<TestScenario::SingleStream> {
   QueryScheduler(const TestSettingsInternal& /*settings*/,
@@ -382,7 +391,7 @@ struct QueryScheduler<TestScenario::SingleStream> {
   QueryMetadata* prev_query = nullptr;
 };
 
-// MultiStream QueryScheduler
+/// \brief Schedules queries for issuance in the multi stream scenario.
 template <>
 struct QueryScheduler<TestScenario::MultiStream> {
   QueryScheduler(const TestSettingsInternal& settings,
@@ -436,7 +445,7 @@ struct QueryScheduler<TestScenario::MultiStream> {
   std::queue<QueryMetadata*> prev_queries;
 };
 
-// MultiStreamFree QueryScheduler
+/// \brief Schedules queries for issuance in the single stream free scenario.
 template <>
 struct QueryScheduler<TestScenario::MultiStreamFree> {
   QueryScheduler(const TestSettingsInternal& settings,
@@ -469,7 +478,7 @@ struct QueryScheduler<TestScenario::MultiStreamFree> {
   std::queue<QueryMetadata*> prev_queries;
 };
 
-// Server QueryScheduler
+/// \brief Schedules queries for issuance in the server scenario.
 template <>
 struct QueryScheduler<TestScenario::Server> {
   QueryScheduler(const TestSettingsInternal& /*settings*/,
@@ -493,7 +502,7 @@ struct QueryScheduler<TestScenario::Server> {
   const PerfClock::time_point start;
 };
 
-// Offline QueryScheduler
+/// \brief Schedules queries for issuance in the offline scenario.
 template <>
 struct QueryScheduler<TestScenario::Offline> {
   QueryScheduler(const TestSettingsInternal& /*settings*/,
@@ -510,8 +519,8 @@ struct QueryScheduler<TestScenario::Offline> {
   const PerfClock::time_point start;
 };
 
-// Provides performance results that are independent of scenario
-// and other context.
+/// \brief Provides performance results that are independent of scenario
+/// and other context.
 struct PerformanceResult {
   std::vector<QuerySampleLatency> latencies;
   size_t queries_issued;
@@ -521,6 +530,8 @@ struct PerformanceResult {
   double final_query_all_samples_done_time;  // seconds from start.
 };
 
+
+/// \brief Issues a series of pre-generated queries.
 // TODO: Templates for scenario and mode are overused, given the loadgen
 //       no longer generates queries on the fly. Should we reduce the
 //       use of templates?
@@ -651,8 +662,8 @@ PerformanceResult IssueQueries(SystemUnderTest* sut,
                            final_query_all_samples_done_time};
 }
 
-// Takes the raw PerformanceResult and uses relevant context to determine
-// how to interpret and report it.
+/// \brief Wraps PerformanceResult with relevant context to change how
+/// it's interpreted and reported.
 struct PerformanceSummary {
   std::string sut_name;
   TestSettingsInternal settings;
@@ -663,6 +674,8 @@ struct PerformanceSummary {
   QuerySampleLatency latency_min = 0;
   QuerySampleLatency latency_max = 0;
   QuerySampleLatency latency_mean = 0;
+
+  /// \brief The latency at a given percentile.
   struct PercentileEntry {
     const double percentile;
     QuerySampleLatency value = 0;
@@ -920,6 +933,7 @@ void LoadSamplesToRam(QuerySampleLibrary* qsl,
   qsl->LoadSamplesToRam(samples);
 }
 
+/// \brief Runs the performance mode, templated by scenario.
 template <TestScenario scenario>
 void RunPerformanceMode(SystemUnderTest* sut, QuerySampleLibrary* qsl,
                         const TestSettingsInternal& settings,
@@ -943,6 +957,8 @@ void RunPerformanceMode(SystemUnderTest* sut, QuerySampleLibrary* qsl,
   qsl->UnloadSamplesFromRam(performance_set.set);
 }
 
+/// \brief Runs the binary search mode, templated by scenario.
+/// TODO: Implement this.
 template <TestScenario scenario>
 void FindPeakPerformanceMode(
     SystemUnderTest* sut, QuerySampleLibrary* qsl,
@@ -971,6 +987,7 @@ void FindPeakPerformanceMode(
   qsl->UnloadSamplesFromRam(performance_set.set);
 }
 
+/// \brief Runs the accuracy mode, templated by scenario.
 template <TestScenario scenario>
 void RunAccuracyMode(SystemUnderTest* sut, QuerySampleLibrary* qsl,
                      const TestSettingsInternal& settings,
@@ -1000,8 +1017,8 @@ void RunAccuracyMode(SystemUnderTest* sut, QuerySampleLibrary* qsl,
   }
 }
 
-// Routes runtime scenario requests to the corresponding instances of its
-// templated mode functions.
+/// \brief Routes runtime scenario requests to the corresponding instances
+/// of its templated mode functions.
 struct RunFunctions {
   using Signature = void(SystemUnderTest* sut, QuerySampleLibrary* qsl,
                          const TestSettingsInternal& settings,
@@ -1038,8 +1055,8 @@ struct RunFunctions {
   const Signature& find_peak_performance;
 };
 
-// Generates random sets of samples in the QSL that we can load into RAM
-// at the same time.
+/// \brief Generates random sets of samples in the QSL that we can load into
+/// RAM at the same time.
 std::vector<LoadableSampleSet> GenerateLoadableSets(
     QuerySampleLibrary* qsl, const TestSettingsInternal& settings) {
   auto tracer = MakeScopedTracer(
@@ -1102,6 +1119,7 @@ std::vector<LoadableSampleSet> GenerateLoadableSets(
   return result;
 }
 
+/// \brief Opens and and owns handles to all of the log files.
 struct LogOutputs {
   LogOutputs(const LogOutputSettings& output_settings,
              const std::string& test_date_time) {
@@ -1173,7 +1191,7 @@ void StartTest(SystemUnderTest* sut, QuerySampleLibrary* qsl,
     detail("QSL total size: ", qsl->TotalSampleCount());
     detail("QSL performance size: ", qsl->PerformanceSampleCount());
   });
-  TestSettingsInternal sanitized_settings(requested_settings);
+  loadgen::TestSettingsInternal sanitized_settings(requested_settings);
   sanitized_settings.LogAllSettings();
 
   std::vector<loadgen::LoadableSampleSet> loadable_sets(

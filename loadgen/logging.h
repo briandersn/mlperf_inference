@@ -10,6 +10,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+/// \file
+/// \brief Internal logging implementation details.
+
 #ifndef MLPERF_LOADGEN_LOGGING_H_
 #define MLPERF_LOADGEN_LOGGING_H_
 
@@ -43,6 +46,7 @@ class TlsLoggerWrapper;
 using AsyncLogEntry = std::function<void(AsyncLog&)>;
 using PerfClock = std::chrono::high_resolution_clock;
 
+/// \brief Logs the raw bytes as a hexadecimal ascii string.
 struct LogBinaryAsHexString {
   std::vector<uint8_t>* data;
 };
@@ -55,10 +59,10 @@ const T& ArgValueTransform(const T& value) {
   return value;
 }
 
-// AsyncLog is passed as an argument to the log lambda on the
-// recording thread to serialize the data captured by the lambda and
-// forward it to the output stream.
-// TODO: Move non-templated methods to the cc file.
+/// \brief The proxy a Log lambda uses to write to one or more logs.
+/// \details Passed as an argument to the log lambda on the
+/// recording thread to serialize the data captured by the lambda and
+/// forward it to the output stream.
 class AsyncLog {
  public:
   AsyncLog();
@@ -252,7 +256,7 @@ class AsyncLog {
   }
 };
 
-// Logs all threads belonging to a run.
+/// \brief The central logger that logs all threads belonging to a run.
 class Logger {
  public:
   Logger(std::chrono::duration<double> poll_period, size_t max_threads_to_log);
@@ -289,8 +293,8 @@ class Logger {
   void GatherRetrySwapRequests(std::vector<TlsLogger*>* threads_to_swap);
   void GatherNewSwapRequests(std::vector<TlsLogger*>* threads_to_swap);
 
-  // The main logging thread function that handles the serialization
-  // and I/O to the stream or file.
+  /// \brief The main logging thread function that handles the serialization
+  /// and I/O to the stream or file.
   void IOThread();
 
   // Slow synchronous error logging for internals that may prevent
@@ -354,8 +358,14 @@ class Logger {
 };
 
 Logger& GlobalLogger();
+
+/// \brief The generic way to add a log entry.
+/// \details Supports all types of logs, which is useful for complex
+/// lambdas that may wish to log in multiple places or log something other
+/// than a simple summary, detail, or trace entry.
 void Log(AsyncLogEntry&& entry);
 
+/// \brief The proxy a LogSummary lambda uses to write to the summary log.
 class AsyncSummary {
  public:
   explicit AsyncSummary(AsyncLog& async_log) : async_log_(async_log) {}
@@ -371,6 +381,7 @@ class AsyncSummary {
   AsyncLog& async_log_;
 };
 
+/// \brief A helper to simplify adding a summary log entry.
 template <typename LambdaT>
 void LogSummary(LambdaT&& lambda) {
   Log([lambda = std::forward<LambdaT>(lambda)](AsyncLog& log) mutable {
@@ -379,6 +390,7 @@ void LogSummary(LambdaT&& lambda) {
   });
 }
 
+/// \brief The proxy a LogDetail lambda uses to write to the detail log.
 class AsyncDetail {
  public:
   explicit AsyncDetail(AsyncLog& async_log) : async_log_(async_log) {}
@@ -401,6 +413,7 @@ class AsyncDetail {
   AsyncLog& async_log_;
 };
 
+/// \brief A helper to simplify adding a detail log entry.
 template <typename LambdaT>
 void LogDetail(LambdaT&& lambda) {
   Log([lambda = std::forward<LambdaT>(lambda),
@@ -411,6 +424,7 @@ void LogDetail(LambdaT&& lambda) {
   });
 }
 
+/// \brief The proxy a ScopedTracer lambda uses to write to the detail log.
 class AsyncTrace {
  public:
   explicit AsyncTrace(AsyncLog& async_log) : async_log_(async_log) {}
@@ -426,7 +440,8 @@ class AsyncTrace {
   AsyncLog& async_log_;
 };
 
-// ScopedTracer is an RAII object that traces the start and end of its lifetime.
+/// \brief ScopedTracer is an RAII object that traces the start and end
+/// of its lifetime.
 template <typename LambdaT>
 class ScopedTracer {
  public:
@@ -447,10 +462,11 @@ class ScopedTracer {
   LambdaT lambda_;
 };
 
-// MakeScopedTracer helps with automatic template type deduction, which
-// has been supported for functions for a long time.
-// C++17 will support deduction for classes, which will neutralize the utility
-// of a helper function like this.
+/// \brief Helper that creates a ScopeTracer with automatic type deduction.
+/// \details Helps with automatic template type deduction, which has been
+/// supported for functions for a long time.
+/// C++17 will support deduction for classes, which will neutralize the utility
+/// of a helper function like this.
 template <typename LambdaT>
 auto MakeScopedTracer(LambdaT&& lambda) -> ScopedTracer<LambdaT> {
   return ScopedTracer<LambdaT>(std::forward<LambdaT>(lambda));
