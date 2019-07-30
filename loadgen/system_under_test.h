@@ -10,6 +10,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+/// \file
+/// \brief Defines the SystemUnderTest interface.
+
 #ifndef MLPERF_LOADGEN_SYSTEM_UNDER_TEST_H
 #define MLPERF_LOADGEN_SYSTEM_UNDER_TEST_H
 

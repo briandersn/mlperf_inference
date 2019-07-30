@@ -19,6 +19,7 @@ limitations under the License.
 
 #include <cstddef>
 
+/// \brief Contains the loadgen API.
 namespace mlperf {
 
 struct QuerySampleResponse;

@@ -28,7 +28,7 @@ namespace mlperf {
 /// @{
 
 /// \brief Represents a unique identifier for a sample of an issued query.
-/// \detail As currently implemented, the id is a pointer to an internal
+/// \details As currently implemented, the id is a pointer to an internal
 /// loadgen struct.
 typedef uintptr_t ResponseId;
 

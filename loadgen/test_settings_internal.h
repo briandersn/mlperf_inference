@@ -10,6 +10,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+/// \file
+/// \brief The internal representation of user-provided settings.
+
 #ifndef MLPERF_LOADGEN_TEST_SETTINGS_INTERNAL_H
 #define MLPERF_LOADGEN_TEST_SETTINGS_INTERNAL_H
 
@@ -66,7 +69,6 @@ struct TestSettingsInternal {
   uint64_t sample_index_rng_seed;
   uint64_t schedule_rng_seed;
 };
-
 
 }  // namespace loadgen
 }  // namespace mlperf

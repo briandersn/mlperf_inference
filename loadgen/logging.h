@@ -36,6 +36,8 @@ limitations under the License.
 
 namespace mlperf {
 
+/// \brief Wait-free logging utilities that defer serialization
+/// and syscalls to a worker thread.
 namespace logging {
 
 class AsyncLog;

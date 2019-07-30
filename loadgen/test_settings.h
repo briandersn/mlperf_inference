@@ -10,16 +10,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-///
-/// @file
-/// This file provides ways for the client to change the behavior and
+/// \file
+/// \brief Provides ways for a client to change the behavior and
 /// constraints of the load generator.
-///
-/// Note: The MLPerf specification takes precedent over any of the comments in
-/// this file if there are inconsistencies in regards to how the loadgen
-/// *should* work.
+/// \details Note: The MLPerf specification takes precedent over any of the
+/// comments in this file if there are inconsistencies in regards to how the
+/// loadgen *should* work.
 /// The comments in this file are indicative of the loadgen implementation.
-///
 
 #ifndef MLPERF_LOADGEN_TEST_SETTINGS_H
 #define MLPERF_LOADGEN_TEST_SETTINGS_H

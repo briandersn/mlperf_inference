@@ -36,6 +36,8 @@ limitations under the License.
 #include "version.h"
 
 namespace mlperf {
+
+/// \brief Loadgen implementation details.
 namespace loadgen {
 
 struct SampleMetadata;
@@ -529,7 +531,6 @@ struct PerformanceResult {
   double final_query_issued_time;            // seconds from start.
   double final_query_all_samples_done_time;  // seconds from start.
 };
-
 
 /// \brief Issues a series of pre-generated queries.
 // TODO: Templates for scenario and mode are overused, given the loadgen
@@ -1050,9 +1051,9 @@ struct RunFunctions {
     return GetCompileTime<TestScenario::SingleStream>();
   }
 
-  const Signature& accuracy;
-  const Signature& performance;
-  const Signature& find_peak_performance;
+  Signature& accuracy;
+  Signature& performance;
+  Signature& find_peak_performance;
 };
 
 /// \brief Generates random sets of samples in the QSL that we can load into
@@ -1119,7 +1120,7 @@ std::vector<LoadableSampleSet> GenerateLoadableSets(
   return result;
 }
 
-/// \brief Opens and and owns handles to all of the log files.
+/// \brief Opens and owns handles to all of the log files.
 struct LogOutputs {
   LogOutputs(const LogOutputSettings& output_settings,
              const std::string& test_date_time) {
